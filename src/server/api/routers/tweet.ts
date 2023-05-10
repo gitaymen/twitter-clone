@@ -1,14 +1,13 @@
-import type { Prisma } from "@prisma/client";
-import type { inferAsyncReturnType } from "@trpc/server";
+import { Prisma } from "@prisma/client";
+import { inferAsyncReturnType } from "@trpc/server";
 import { z } from "zod";
 
 import {
   createTRPCRouter,
-  protectedProcedure,
   publicProcedure,
+  protectedProcedure,
+  createTRPCContext,
 } from "~/server/api/trpc";
-
-import type { createTRPCContext } from "~/server/api/trpc";
 
 export const tweetRouter = createTRPCRouter({
   infiniteProfileFeed: publicProcedure
@@ -36,7 +35,7 @@ export const tweetRouter = createTRPCRouter({
       })
     )
     .query(
-      async ({ input: { limit = 10, cursor, onlyFollowing = false }, ctx }) => {
+      async ({ input: { limit = 10, onlyFollowing = false, cursor }, ctx }) => {
         const currentUserId = ctx.session?.user.id;
         return await getInfiniteTweets({
           limit,
@@ -53,7 +52,6 @@ export const tweetRouter = createTRPCRouter({
         });
       }
     ),
-
   create: protectedProcedure
     .input(z.object({ content: z.string() }))
     .mutation(async ({ input: { content }, ctx }) => {
@@ -61,13 +59,15 @@ export const tweetRouter = createTRPCRouter({
         data: { content, userId: ctx.session.user.id },
       });
 
+      void ctx.revalidateSSG?.(`/profiles/${ctx.session.user.id}`);
+
       return tweet;
     }),
-
   toggleLike: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ input: { id }, ctx }) => {
       const data = { tweetId: id, userId: ctx.session.user.id };
+
       const existingLike = await ctx.prisma.like.findUnique({
         where: { userId_tweetId: data },
       });
@@ -94,6 +94,7 @@ async function getInfiniteTweets({
   ctx: inferAsyncReturnType<typeof createTRPCContext>;
 }) {
   const currentUserId = ctx.session?.user.id;
+
   const data = await ctx.prisma.tweet.findMany({
     take: limit + 1,
     cursor: cursor ? { createdAt_id: cursor } : undefined,
@@ -103,18 +104,15 @@ async function getInfiniteTweets({
       id: true,
       content: true,
       createdAt: true,
+      _count: { select: { likes: true } },
       likes:
         currentUserId == null ? false : { where: { userId: currentUserId } },
-      _count: { select: { likes: true } },
       user: {
-        select: {
-          name: true,
-          id: true,
-          image: true,
-        },
+        select: { name: true, id: true, image: true },
       },
     },
   });
+
   let nextCursor: typeof cursor | undefined;
   if (data.length > limit) {
     const nextItem = data.pop();
@@ -122,6 +120,7 @@ async function getInfiniteTweets({
       nextCursor = { id: nextItem.id, createdAt: nextItem.createdAt };
     }
   }
+
   return {
     tweets: data.map((tweet) => {
       return {
