@@ -18,8 +18,8 @@ export function NewTweetForm() {
 function Form() {
   const session = useSession();
   const [inputValue, setInputValue] = useState("");
-  const textAreaRef = useRef<HTMLTextAreaElement>(null);
-
+  const textAreaRef = useRef<HTMLTextAreaElement>();
+  
   const inputRef = useCallback((textArea: HTMLTextAreaElement) => {
     updateTextAreaSize(textArea);
     textAreaRef.current = textArea;
